@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.sconsign.dblite
+.gcc-flags.json
+
+# Editors/IDE
+.idea/
+.vscode/
+.history/
+
+# Caches/Logs
+.cache/
+*.log
+
+# Local env/config
+.env*
+
+# Large external docs/repo clone (not needed for build)
+repo_JC2432W328/
+
