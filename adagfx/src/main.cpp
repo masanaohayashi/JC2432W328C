@@ -5,6 +5,8 @@
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
+#include <SD.h>
+#include <esp_heap_caps.h>
 #include <lvgl.h>
 #include "CST820.h"
 
@@ -14,9 +16,13 @@
 #define TFT_BL   27
 #define TFT_SCLK 14
 #define TFT_MOSI 13
-#define TFT_MISO -1
+#define TFT_MISO 12
 
-Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+// SPIバスを分離する:
+//  - TFT: HSPI (SCLK=14, MOSI=13, MISO=12, CS=15)
+//  - SD : VSPI (SCLK=18, MOSI=23, MISO=19, CS=5)
+static SPIClass hspi(HSPI);
+Adafruit_ST7789 tft = Adafruit_ST7789(&hspi, TFT_CS, TFT_DC, TFT_RST);
 
 // JC2432W328 (Capacitive) 既定ピン: SDA=33, SCL=32, RST=25, INT=21
 #ifndef TOUCH_SDA
@@ -50,6 +56,15 @@ Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
 static CST820* tp = nullptr;
 
+static void print_mem(const char* stage) {
+  size_t free8   = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+  size_t freeDMA = heap_caps_get_free_size(MALLOC_CAP_DMA);
+  size_t freePS  = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  Serial.printf("[MEM %s] DRAM free=%u KB, largest=%u KB, DMA free=%u KB, PSRAM free=%u KB\n",
+                stage, (unsigned)(free8/1024), (unsigned)(largest/1024), (unsigned)(freeDMA/1024), (unsigned)(freePS/1024));
+}
+
 static bool i2c_probe_addr(uint8_t sda, uint8_t scl, uint8_t addr) {
   Wire.begin(sda, scl);
   Wire.setClock(400000);
@@ -60,9 +75,12 @@ static bool i2c_probe_addr(uint8_t sda, uint8_t scl, uint8_t addr) {
 
 // 自動探索は使わない（固定ピンで初期化）
 
-// LVGL用ダブルバッファ（行数は40程度）
-static lv_color_t lv_buf1[320 * 40];
-static lv_color_t lv_buf2[320 * 40];
+// LVGL用描画バッファ
+// メモリ節約のためシングルバッファに変更（80行: 約50KB）
+#ifndef LVGL_BUF_LINES
+#define LVGL_BUF_LINES 80
+#endif
+static lv_color_t lv_buf1[320 * LVGL_BUF_LINES];
 
 extern "C" uint32_t lvgl_tick_get_cb(void) { return millis(); }
 
@@ -83,7 +101,8 @@ static void lvgl_begin(uint16_t hor, uint16_t ver) {
   lv_init();
 
   static lv_disp_draw_buf_t draw_buf;
-  lv_disp_draw_buf_init(&draw_buf, lv_buf1, lv_buf2, hor * 40);
+  // 2ndバッファをNULLにしてシングルバッファ運用
+  lv_disp_draw_buf_init(&draw_buf, lv_buf1, NULL, hor * LVGL_BUF_LINES);
 
   static lv_disp_drv_t disp_drv;
   lv_disp_drv_init(&disp_drv);
@@ -153,13 +172,14 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.println("Boot: JC2432W328 LVGL demo starting");
+  print_mem("boot");
 
-  // SPIピンを指定（ESP32はデフォルトが SCLK=18 MOSI=23 なので必須）
-  SPI.begin(TFT_SCLK, TFT_MISO, TFT_MOSI, TFT_CS);
+  // TFT用: HSPIにピンを割り当て
+  hspi.begin(TFT_SCLK, TFT_MISO, TFT_MOSI, TFT_CS);
 
   tft.init(240, 320);          // ST7789 240x320（ネイティブ）
   tft.setRotation(1);          // 横向き 320x240
-  tft.setSPISpeed(27000000);   // 27MHz（不安定なら 20000000 へ）
+  tft.setSPISpeed(80000000);   // 80MHz（不安定なら 60MHz/40MHz に戻す）
   tft.invertDisplay(false);    // 必要に応じて true に
   // tft.setColRowStart(x, y);  // ずれがある場合のみ有効化
 
@@ -174,6 +194,8 @@ void setup() {
   uint16_t H = tft.height();
   Serial.printf("Rotation=1 width=%u height=%u\n", W, H);
   lvgl_begin(W, H);
+  Serial.printf("LVGL buffer lines=%d, bytes=%u\n", (int)LVGL_BUF_LINES, (unsigned)sizeof(lv_buf1));
+  print_mem("after_lvgl");
 
   // Touch開始（自動探索）
   tp = new CST820(TOUCH_SDA, TOUCH_SCL, TOUCH_RST, TOUCH_INT, I2C_ADDR_CST820);
@@ -212,6 +234,62 @@ void setup() {
     data->point.y = sy;
   };
   lv_indev_drv_register(&indev_drv);
+
+  // SD (VSPI: SCK=18, MISO=19, MOSI=23, CS=5)
+  SPIClass sdSPI(VSPI);
+  sdSPI.begin(18, 19, 23, 5);
+  bool sd_ok = SD.begin(5, sdSPI, 10000000);
+  lv_obj_t* sd_lbl = lv_label_create(lv_scr_act());
+  if (sd_ok) {
+    // ルートを少し列挙
+    File root = SD.open("/");
+    int count = 0; String names = "";
+    if (root) {
+      File f;
+      while ((f = root.openNextFile())) {
+        if (count < 3) names += String(f.name()) + " ";
+        f.close();
+        count++;
+      }
+      root.close();
+    }
+    Serial.printf("SD OK: files=%d %s\n", count, names.c_str());
+    lv_label_set_text_fmt(sd_lbl, "SD: OK CS=5 VSPI, files=%d %s", count, names.length()? ("["+names+"]").c_str():"");
+
+    // 読み書きテスト
+    const char* testPath = "/lvgl_sd_test.txt";
+    String payload = String("Hello SD @") + String(millis());
+    bool wr_ok = false, rd_ok = false; String readBack = "";
+
+    // Write
+    File wf = SD.open(testPath, FILE_WRITE);
+    if (wf) {
+      size_t n = wf.print(payload);
+      wf.flush(); wf.close();
+      wr_ok = (n == payload.length());
+    }
+
+    // Read
+    File rf = SD.open(testPath, FILE_READ);
+    if (rf) {
+      while (rf.available() && readBack.length() < 64) {
+        readBack += (char)rf.read();
+      }
+      rf.close();
+      rd_ok = (readBack.length() > 0);
+    }
+    Serial.printf("SD RW: write=%s read=%s content='%s'\n", wr_ok?"OK":"NG", rd_ok?"OK":"NG", readBack.c_str());
+
+    // 画面に結果ラベル
+    lv_obj_t* sd_rw = lv_label_create(lv_scr_act());
+    lv_label_set_text_fmt(sd_rw, "RW: %s/%s %s", wr_ok?"OK":"NG", rd_ok?"OK":"NG", rd_ok? readBack.c_str():"");
+    lv_obj_align(sd_rw, LV_ALIGN_BOTTOM_RIGHT, -4, -22);
+  } else {
+    Serial.println("SD NG: Not found (VSPI CS=5)");
+    lv_label_set_text(sd_lbl, "SD: Not found");
+  }
+    lv_obj_align(sd_lbl, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
+    print_mem("after_sd");
 }
 
 void loop() {

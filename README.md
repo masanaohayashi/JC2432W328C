@@ -124,3 +124,6 @@ https://www.reddit.com/r/esp32/comments/1k5tskc/cyd_jc2432w328_working_nerdminer
 
 touch not Working CYD JC2432W328 Display 240x320 2.8" USB-C
 https://www.reddit.com/r/esp32/comments/1gmpmy4/touch_not_working_cyd_jc2432w328_display_240x320/?show=original
+
+ESP32 2432S028R (CYD)でLVGL - ILI9341 vs ST7789 速度比較
+https://embedded-kiddie.github.io/2025/03/09/
