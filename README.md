@@ -54,6 +54,7 @@ Adafruit_GFX（ST7789）と LVGL v8 を組み合わせた最小 UI（スライ�
 3. `platformio.ini` の `upload_port`/`monitor_port` を実ポートに合わせる（例: `/dev/cu.usbserial-210`）
 4. ビルド＆書き込み: `pio run -t upload`
 5. モニタ（任意）: `pio device monitor -b 115200`
+6. ビルド&書き込みして即座にモニタする: `pio run -t upload && sleep 1 && pio device monitor -b 115200`
 
 起動後の期待動作
 

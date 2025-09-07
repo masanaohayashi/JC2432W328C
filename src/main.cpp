@@ -151,7 +151,8 @@ static void lvgl_begin(uint16_t hor, uint16_t ver) {
 
 void setup() {
   Serial.begin(115200);
-  delay(50);
+  delay(200);
+  Serial.println("Boot: JC2432W328 LVGL demo starting");
 
   // SPIピンを指定（ESP32はデフォルトが SCLK=18 MOSI=23 なので必須）
   SPI.begin(TFT_SCLK, TFT_MISO, TFT_MOSI, TFT_CS);
@@ -215,5 +216,7 @@ void setup() {
 
 void loop() {
   lv_timer_handler();
+  static uint32_t last = 0; uint32_t now = millis();
+  if (now - last > 1000) { last = now; Serial.println("HB"); }
   delay(5);
 }
