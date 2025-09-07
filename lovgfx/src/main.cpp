@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 #include "../include/LGFX_Driver.hpp"
+#include <SPI.h>
+#include <SD.h>
 #include <lvgl.h>
 #include "CST820.h"
 
@@ -154,6 +156,58 @@ void setup() {
     indev_drv.user_data = &tp;
     lv_indev_drv_register(&indev_drv);
 
+    // --- SD read/write test (VSPI: SCK=18, MISO=19, MOSI=23, CS=5) ---
+    SPIClass sdSPI(VSPI);
+    sdSPI.begin(18, 19, 23, 5);
+    bool sd_ok = SD.begin(5, sdSPI, 10000000);
+
+    // 右下に結果を表示するラベル
+    lv_obj_t* sd_lbl = lv_label_create(root);
+    lv_obj_align(sd_lbl, LV_ALIGN_BOTTOM_RIGHT, -4, -4);
+
+    if (sd_ok) {
+        // ルートを少し列挙
+        File rootDir = SD.open("/");
+        int count = 0; String names;
+        if (rootDir) {
+            for (File f = rootDir.openNextFile(); f; f = rootDir.openNextFile()) {
+                if (count < 3) {
+                    names += f.name(); names += ' ';
+                }
+                f.close();
+                ++count;
+            }
+            rootDir.close();
+        }
+
+        // RWテスト
+        const char* testPath = "/lovgfx_sd_test.txt";
+        String payload = String("Hello SD @") + String(millis());
+        bool wr_ok = false, rd_ok = false; String readBack;
+
+        File wf = SD.open(testPath, FILE_WRITE);
+        if (wf) {
+            size_t n = wf.print(payload);
+            wf.flush(); wf.close();
+            wr_ok = (n == payload.length());
+        }
+        File rf = SD.open(testPath, FILE_READ);
+        if (rf) {
+            while (rf.available() && readBack.length() < 64) readBack += (char)rf.read();
+            rf.close();
+            rd_ok = (readBack.length() > 0);
+        }
+
+        Serial.printf("[SD] OK files=%d %s | RW=%s/%s '%s'\n",
+                      count, names.c_str(), wr_ok?"OK":"NG", rd_ok?"OK":"NG", readBack.c_str());
+        lv_label_set_text_fmt(sd_lbl, "SD: OK CS=5 VSPI files=%d %s\nRW: %s/%s %s",
+                              count, names.length()? ("[" + names + "]").c_str() : "",
+                              wr_ok?"OK":"NG", rd_ok?"OK":"NG", rd_ok? readBack.c_str(): "");
+    } else {
+        Serial.println("[SD] Not found (VSPI CS=5)");
+        lv_label_set_text(sd_lbl, "SD: Not found");
+    }
+
     // simple color bars
     int w = tft.width();
     int h = tft.height();
@@ -188,4 +242,3 @@ void loop() {
     lv_timer_handler();
     delay(5);
 }
-
