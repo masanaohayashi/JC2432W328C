@@ -5,16 +5,18 @@
 #include <esp_heap_caps.h>
 #include <SPI.h>
 #include <SD.h>
+#include <BluetoothA2DPSink.h>
 #include <lvgl.h>
 #include "CST820.h"
 
 static LGFX tft;
+static BluetoothA2DPSink a2dp;
 
 extern "C" uint32_t lvgl_tick_get_cb(void) { return millis(); }
 
 // LVGL draw buffer（行数控えめ）
 #ifndef LV_LINES
-#define LV_LINES 40
+#define LV_LINES 20
 #endif
 static lv_color_t lvbuf1[320 * LV_LINES];
 
@@ -171,6 +173,23 @@ void setup() {
     };
     indev_drv.user_data = &tp;
     lv_indev_drv_register(&indev_drv);
+
+    // --- A2DP sink init (I2S: LRCK=22, BCK=26, DATA=4) ---
+    {
+        i2s_pin_config_t pin_cfg = {
+            .bck_io_num   = 26,
+            .ws_io_num    = 22,
+            .data_out_num = 4,
+            .data_in_num  = I2S_PIN_NO_CHANGE
+        };
+        a2dp.set_pin_config(pin_cfg);
+        a2dp.set_auto_reconnect(true);
+        a2dp.set_volume(90); // 0..100
+        const char* dev_name = "CYD A2DP Sink";
+        a2dp.start(dev_name);
+        Serial.printf("[A2DP] ready as '%s'\n", dev_name);
+        print_mem("after_bt");
+    }
 
     // --- SD read/write test (VSPI: SCK=18, MISO=19, MOSI=23, CS=5) ---
     SPIClass sdSPI(VSPI);
