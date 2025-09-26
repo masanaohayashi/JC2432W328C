@@ -4,11 +4,14 @@
 #include <esp_heap_caps.h>
 #include <vector>
 
+#include "LGFX_Driver.hpp"
+
 using audio_tools::I2SStream;
 
 //  A2DP (16bit->32bit)
 static I2SStream i2s;
 static BluetoothA2DPSink a2dp_sink;
+static LGFX tft;
 static bool isA2dpConnected = false;
 static constexpr const char* dev_name = "TWV2000C";
 static std::vector<int32_t> sample_buffer;
@@ -53,6 +56,17 @@ void setup() {
     Serial.println("A2DP sink starting...");
     print_mem("boot");
 
+    // LovyanGFX 初期化 (軽量なHello World表示)
+    tft.init();
+    tft.setRotation(1);
+    tft.fillScreen(lgfx::color565(0, 0, 0));
+    tft.setTextColor(lgfx::color565(255, 255, 255));
+    tft.setTextDatum(lgfx::textdatum_t::middle_center);
+    tft.setFont(&lgfx::fonts::AsciiFont8x16);
+    tft.drawString("Hello LovyanGFX", tft.width() / 2, tft.height() / 3);
+    tft.setTextDatum(lgfx::textdatum_t::top_center);
+    tft.drawString("Waiting for A2DP...", tft.width() / 2, tft.height() / 2);
+
     // I2S pins (avoid conflicts with TFT/SD on CYD): LRCK=22, BCK=26, DATA=4
     // 変更: AudioToolsを使ったピン設定
     auto cfg = i2s.defaultConfig();
@@ -90,6 +104,12 @@ void loop() {
     if (now - ts > 3000) {
         ts = now;
         print_mem("run");
+        tft.setTextColor(lgfx::color565(0, 255, 128), lgfx::color565(0, 0, 0));
+        const char* status = isA2dpConnected ? "A2DP Connected" : "Waiting for A2DP...";
+        tft.fillRect(0, tft.height() * 2 / 3, tft.width(), tft.fontHeight(), lgfx::color565(0, 0, 0));
+        tft.setTextDatum(lgfx::textdatum_t::middle_center);
+        tft.drawString(status, tft.width() / 2, tft.height() * 2 / 3);
+        tft.setTextDatum(lgfx::textdatum_t::top_center);
     }
     delay(10);
 }
