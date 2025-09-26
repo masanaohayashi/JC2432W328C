@@ -3,6 +3,7 @@
 
 # PlatformIO
 .pio/
+.piohome/
 .pioenvs/
 .piolibdeps/
 .sconsign.dblite
@@ -22,4 +23,3 @@
 
 # Large external docs/repo clone (not needed for build)
 repo_JC2432W328/
-
